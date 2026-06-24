@@ -63,13 +63,13 @@ echo -e "${BLUE}📋 Scanning ${FILE_COUNT} file(s) for private keys...${NC}\n"
 
 # Patterns to detect
 # 1. Ethereum private key: 0x + 64 hex chars
-ETHEREUM_KEY_PATTERN='0x[a-fA-F0-9]\{64\}'
+ETHEREUM_KEY_PATTERN='0x[a-fA-F0-9]{64}'
 
 # 2. PEM format private keys (avoid leading dash confusion with grep options)
 PEM_PATTERN='BEGIN.*PRIVATE KEY'
 
 # 3. AWS access key
-AWS_ACCESS_PATTERN='AKIA[0-9A-Z]\{16\}'
+AWS_ACCESS_PATTERN='AKIA[0-9A-Z]{16}'
 
 # 4. AWS secret key
 AWS_SECRET_PATTERN='aws_secret_access_key[[:space:]]*=[[:space:]]*'
@@ -79,23 +79,23 @@ AWS_SECRET_PATTERN='aws_secret_access_key[[:space:]]*=[[:space:]]*'
 PRIVATE_KEY_WITH_VALUE_PATTERN='private[_-]key[[:space:]]*[:=][[:space:]]*0x[a-fA-F0-9]{32,}'
 
 # 6. OpenAI API keys (sk-... or sk-proj-...)
-OPENAI_KEY_PATTERN='sk-[a-zA-Z0-9]\{48,\}'
-OPENAI_PROJ_KEY_PATTERN='sk-proj-[a-zA-Z0-9_-]\{48,\}'
+OPENAI_KEY_PATTERN='sk-[a-zA-Z0-9]{48,}'
+OPENAI_PROJ_KEY_PATTERN='sk-proj-[a-zA-Z0-9_-]{48,}'
 
 # 7. Google AI (Gemini) API keys (AIza...)
-GOOGLE_AI_KEY_PATTERN='AIza[a-zA-Z0-9_-]\{35,\}'
+GOOGLE_AI_KEY_PATTERN='AIza[a-zA-Z0-9_-]{35,}'
 
 # 8. Anthropic (Claude) API keys (sk-ant-...)
-ANTHROPIC_KEY_PATTERN='sk-ant-[a-zA-Z0-9_-]\{95,\}'
+ANTHROPIC_KEY_PATTERN='sk-ant-[a-zA-Z0-9_-]{95,}'
 
 # 9. GitHub Personal Access Tokens (ghp_..., gho_..., ghs_...)
-GITHUB_PAT_PATTERN='gh[pousr]_[a-zA-Z0-9]\{36,\}'
+GITHUB_PAT_PATTERN='gh[pousr]_[a-zA-Z0-9]{36,}'
 
 # 10. Stripe API keys (sk_live_..., sk_test_...)
-STRIPE_KEY_PATTERN='sk_\(live\|test\)_[a-zA-Z0-9]\{24,\}'
+STRIPE_KEY_PATTERN='sk_(live|test)_[a-zA-Z0-9]{24,}'
 
 # 11. Generic API key patterns (api_key=..., apiKey:...)
-GENERIC_API_KEY_PATTERN='[aA][pP][iI][_-]\?[kK][eE][yY][[:space:]]*[:=][[:space:]]*["\x27][a-zA-Z0-9_-]\{32,\}["\x27]'
+GENERIC_API_KEY_PATTERN='[aA][pP][iI][_-]?[kK][eE][yY][[:space:]]*[:=][[:space:]]*["\x27][a-zA-Z0-9_-]{32,}["\x27]'
 
 FOUND_SECRETS=0
 
@@ -107,9 +107,18 @@ for FILE in $FILES_TO_SCAN; do
   # Check each pattern
   FINDINGS=""
 
-  if grep -nE "$ETHEREUM_KEY_PATTERN" "$FILE" > /dev/null 2>&1; then
+  # A bare 0x+64hex string is indistinguishable from a legitimate bytes32 (hashes,
+  # storage slots, calldata, test fixtures). Only flag it as a private key when it
+  # looks secret: the file is a .env, or the line carries a secret-ish keyword.
+  if echo "$FILE" | grep -qiE '(^|/)\.env'; then
+    ETH_HITS=$(grep -nE "$ETHEREUM_KEY_PATTERN" "$FILE" 2>/dev/null || true)
+  else
+    ETH_HITS=$(grep -niE 'priv|secret|mnemonic|seed|wallet|signer' "$FILE" 2>/dev/null \
+      | grep -E "$ETHEREUM_KEY_PATTERN" || true)
+  fi
+  if [ -n "$ETH_HITS" ]; then
     FINDINGS="${FINDINGS}   [CRITICAL] Ethereum Private Key (256-bit hex)\n"
-    FINDINGS="${FINDINGS}$(grep -nE "$ETHEREUM_KEY_PATTERN" "$FILE" | sed 's/^/     /')\n"
+    FINDINGS="${FINDINGS}$(echo "$ETH_HITS" | sed 's/^/     /')\n"
     FOUND_SECRETS=1
   fi
 
